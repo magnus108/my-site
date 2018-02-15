@@ -3,6 +3,8 @@
 import           Data.Monoid (mappend, (<>))
 import           Hakyll
 import           Data.Maybe
+import           System.FilePath.Posix (takeBaseName,takeDirectory,(</>))
+import           Data.List (isSuffixOf)
 
 import Debug.Trace
 -------------------------------------------------------------------------------
@@ -56,7 +58,7 @@ main = hakyll $ do
 
     tagsRules tags $ \tag pattern -> do
         let title = "Posts tagged \"" ++ tag ++ "\""
-        route idRoute
+        route cleanRoute
         compile $ do
             posts <- recentFirst =<< loadAll pattern
             let ctx = constField "title" title
@@ -67,18 +69,20 @@ main = hakyll $ do
                 >>= loadAndApplyTemplate "templates/tag.html" ctx
                 >>= loadAndApplyTemplate "templates/default.html" ctx
                 >>= relativizeUrls
+                >>= cleanIndexUrls
 
 
     match "posts/*" $ do
-        route $ setExtension "html"
+        route $ cleanRoute
         compile $ pandocCompiler
             >>= loadAndApplyTemplate "templates/post.html"    (postCtxWithTags tags)
             >>= loadAndApplyTemplate "templates/default.html" (postCtxWithTags tags)
             >>= relativizeUrls
+            >>= cleanIndexUrls
 
 
     create ["archive.html"] $ do
-        route idRoute
+        route cleanRoute
         compile $ do
             posts <- recentFirst =<< loadAll ("posts/*" .&&. hasNoVersion)
             let archiveCtx =
@@ -90,6 +94,7 @@ main = hakyll $ do
                 >>= loadAndApplyTemplate "templates/archive.html" archiveCtx
                 >>= loadAndApplyTemplate "templates/default.html" archiveCtx
                 >>= relativizeUrls
+                >>= cleanIndexUrls
 
 
     match "index.html" $ do
@@ -97,9 +102,7 @@ main = hakyll $ do
         compile $ do
             posts <- recentFirst =<< loadAll ("posts/*" .&&. hasNoVersion)
             let indexCtx =
-                    --postCtx kan også includere tags
                     listField "posts" postCtx (return posts) `mappend`
-                    --hvorfor postCtx
                     listField "tags" defaultContext (return (collectTags tags)) <>
                     constField "title" "Home"                `mappend`
                     defaultContext
@@ -108,6 +111,7 @@ main = hakyll $ do
                 >>= applyAsTemplate indexCtx
                 >>= loadAndApplyTemplate "templates/default.html" indexCtx
                 >>= relativizeUrls
+                >>= cleanIndexUrls
 
     match "templates/*" $ compile templateBodyCompiler
 
@@ -131,3 +135,27 @@ isItem x item = itemBody item == x
 
 
 collectTags tags = map (\(t, _) -> Item (tagsMakeId tags t) t) (tagsMap tags)
+
+
+cleanRoute :: Routes
+cleanRoute = customRoute createIndexRoute
+  where
+    createIndexRoute ident = takeDirectory p </> takeBaseName p </> "index.html"
+                            where p = toFilePath ident
+
+cleanIndexUrls :: Item String -> Compiler (Item String)
+cleanIndexUrls = return . fmap (withUrls cleanIndex)
+
+
+cleanIndexHtmls :: Item String -> Compiler (Item String)
+cleanIndexHtmls = return . fmap (replaceAll pattern replacement)
+    where
+      pattern = "/index.html"
+      replacement = const "/"
+
+
+cleanIndex :: String -> String
+cleanIndex url
+    | idx `isSuffixOf` url = take (length url - length idx) url
+    | otherwise            = url
+  where idx = "index.html"
