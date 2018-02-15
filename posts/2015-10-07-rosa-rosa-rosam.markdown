@@ -1,6 +1,7 @@
 ---
 title: Rosa Rosa Rosam
 author: Ovidius
+tags: far2, foo
 ---
 
 Suspendisse pharetra ullamcorper sem et auctor. Suspendisse vitae tellus eu

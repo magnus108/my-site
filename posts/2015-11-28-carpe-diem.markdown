@@ -1,5 +1,6 @@
 ---
 title: Carpe Diem
+tags: bar1, bar2
 ---
 
 Fusce tortor quam, egestas in posuere quis, porttitor vel turpis. Donec

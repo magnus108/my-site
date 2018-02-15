@@ -1,6 +1,7 @@
 ---
 title: Tu Quoque
 author: Julius
+tags: foo
 ---
 
 Vestibulum leo turpis, dignissim quis ultrices sit amet, iaculis ac ligula.

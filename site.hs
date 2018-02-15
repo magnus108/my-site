@@ -52,11 +52,28 @@ main = hakyll $ do
                 >>= relativizeUrls
                 -}
 
+    tags <- buildTags "posts/*" (fromCapture "tags/*.html")
+
+    tagsRules tags $ \tag pattern -> do
+        let title = "Posts tagged \"" ++ tag ++ "\""
+        route idRoute
+        compile $ do
+            posts <- recentFirst =<< loadAll pattern
+            let ctx = constField "title" title
+                      `mappend` listField "posts" postCtx (return posts)
+                      `mappend` defaultContext
+
+            makeItem ""
+                >>= loadAndApplyTemplate "templates/tag.html" ctx
+                >>= loadAndApplyTemplate "templates/default.html" ctx
+                >>= relativizeUrls
+
+
     match "posts/*" $ do
         route $ setExtension "html"
         compile $ pandocCompiler
-            >>= loadAndApplyTemplate "templates/post.html"    postCtx
-            >>= loadAndApplyTemplate "templates/default.html" postCtx
+            >>= loadAndApplyTemplate "templates/post.html"    (postCtxWithTags tags)
+            >>= loadAndApplyTemplate "templates/default.html" (postCtxWithTags tags)
             >>= relativizeUrls
 
 
@@ -80,7 +97,10 @@ main = hakyll $ do
         compile $ do
             posts <- recentFirst =<< loadAll ("posts/*" .&&. hasNoVersion)
             let indexCtx =
+                    --postCtx kan også includere tags
                     listField "posts" postCtx (return posts) `mappend`
+                    --hvorfor postCtx
+                    listField "tags" defaultContext (return (collectTags tags)) <>
                     constField "title" "Home"                `mappend`
                     defaultContext
 
@@ -98,6 +118,9 @@ postCtx =
     dateField "date" "%B %e, %Y" `mappend`
     defaultContext
 
+
+postCtxWithTags :: Tags -> Context String
+postCtxWithTags tags = tagsField "tags" tags `mappend` postCtx
 -------------------------------------------------------------------------------
 urlFromFilePathItem :: Item String -> Compiler String
 urlFromFilePathItem item = return (toUrl (itemBody item))
@@ -105,3 +128,6 @@ urlFromFilePathItem item = return (toUrl (itemBody item))
 
 isItem :: FilePath -> Item String -> Bool
 isItem x item = itemBody item == x
+
+
+collectTags tags = map (\(t, _) -> Item (tagsMakeId tags t) t) (tagsMap tags)
