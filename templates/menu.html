@@ -1,0 +1,13 @@
+<ul>
+    $for(menu)$
+        <li>
+            <a href="$url$">
+                $if(currentRoute)$
+                    <strong>$title$</strong>
+                $else$
+                    $title$
+                $endif$
+            </a>
+        </li>
+    $endfor$
+</ul>
