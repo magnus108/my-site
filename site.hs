@@ -34,7 +34,7 @@ main = hakyll $ do
         route   idRoute
         compile compressCssCompiler
 
-    match content $
+    match (content .||. "index.html") $
         version "routes" $ do
             compile $ do
                 underLying <- fmap (setVersion Nothing) getUnderlying
@@ -43,11 +43,11 @@ main = hakyll $ do
 
 
 --    match (fromList ["about.rst", "contact.markdown", "404.markdown"]) $ do
-  {-
-    match content $ do
-        route   $ setExtension "html"
+
+    match (fromList ["contact.markdown", "404.markdown"]) $ do
+        route cleanRoute
         compile $ do
-            routes <- loadAll (hasVersion "routes")
+            routes <- moveIndexToFront =<< loadAll (hasVersion "routes")
 
             currentRoute <- getRoute =<< getUnderlying
 
@@ -61,10 +61,10 @@ main = hakyll $ do
                           <> defaultContext
 
             pandocCompiler
-                >>= loadAndApplyTemplate "templates/menu.html"    menuCtx
                 >>= loadAndApplyTemplate "templates/default.html" menuCtx
                 >>= relativizeUrls
-                -}
+                >>= cleanIndexUrls
+
 
     tags <- buildTags posts (fromCapture "tags/*.html")
 
@@ -79,21 +79,36 @@ main = hakyll $ do
 
             makeItem ""
                 >>= loadAndApplyTemplate "templates/tag.html" ctx
-                >>= loadAndApplyTemplate "templates/default.html" ctx
+--                >>= loadAndApplyTemplate "templates/default.html" ctx
                 >>= relativizeUrls
                 >>= cleanIndexUrls
 
 
     match posts $ do
         route $ cleanRouteWithoutDate
-        compile $ pandocCompiler
-            >>= loadAndApplyTemplate "templates/post.html"    (postCtxWithTags tags <> postImageField)
-            >>= loadAndApplyTemplate "templates/default.html" (postCtxWithTags tags <> postImageField)
-            >>= relativizeUrls
-            >>= cleanIndexUrls
+        compile $ do
+
+            routes <- moveIndexToFront =<< loadAll (hasVersion "routes")
+
+            currentRoute <- getRoute =<< getUnderlying
+
+            let menuCtx = listField "menu"
+                              (   field "url" urlFromFilePathItem
+                              <>  boolField "currentRoute"
+                                      (isItem (fromMaybe "" currentRoute))
+                              <>  defaultContext
+                              )
+                              (return routes)
+                          <> defaultContext
+
+            pandocCompiler
+                >>= loadAndApplyTemplate "templates/post.html"    (postCtxWithTags tags <> postImageField <> menuCtx)
+                >>= loadAndApplyTemplate "templates/default.html" (postCtxWithTags tags <> postImageField <> menuCtx)
+                >>= relativizeUrls
+                >>= cleanIndexUrls
 
 
-    create ["archive.html"] $ do
+{-    create ["archive.html"] $ do
         route cleanRoute
         compile $ do
             posts <- recentFirst =<< loadAll (posts .&&. hasNoVersion)
@@ -107,12 +122,25 @@ main = hakyll $ do
                 >>= loadAndApplyTemplate "templates/default.html" archiveCtx
                 >>= relativizeUrls
                 >>= cleanIndexUrls
-
+-}
 
     match "index.html" $ do
         route idRoute
         compile $ do
             posts <- recentFirst =<< loadAll (posts .&&. hasNoVersion)
+            routes <- moveIndexToFront =<< loadAll (hasVersion "routes")
+
+            currentRoute <- getRoute =<< getUnderlying
+
+            let menuCtx = listField "menu"
+                              (   field "url" urlFromFilePathItem
+                              <>  boolField "currentRoute"
+                                      (isItem (fromMaybe "" currentRoute))
+                              <>  defaultContext
+                              )
+                              (return routes)
+                          <> defaultContext
+
             let indexCtx =
                     listField "posts" postCtx (return posts) `mappend`
                     listField "tags" defaultContext (return (collectTags tags)) <>
@@ -121,7 +149,7 @@ main = hakyll $ do
 
             getResourceBody
                 >>= applyAsTemplate indexCtx
-                >>= loadAndApplyTemplate "templates/default.html" indexCtx
+                >>= loadAndApplyTemplate "templates/default.html" (indexCtx <> menuCtx)
                 >>= relativizeUrls
                 >>= cleanIndexUrls
 
@@ -159,9 +187,11 @@ cleanRoute = customRoute createIndexRoute
 cleanRouteWithoutDate :: Routes
 cleanRouteWithoutDate = customRoute createIndexRoute
   where
-    createIndexRoute ident = takeDirectory p </> (drop 11 (takeBaseName p)) </> "index.html"
-                            where p = toFilePath ident
-
+    createIndexRoute ident = directory </> (drop 11 (takeBaseName p)) </> "index.html"
+                            where 
+                                p = toFilePath ident
+                                directory =
+                                    joinPath(init(splitDirectories (takeDirectory p)))
 
 cleanIndexUrls :: Item String -> Compiler (Item String)
 cleanIndexUrls = return . fmap (withUrls cleanIndex)
@@ -252,5 +282,27 @@ imageField pat procs = mconcat $ map (fff pat) procs
                               Just route -> return $ "<img src='" ++ (toUrl route) ++ "'>"
 
 
+
+
+
+-------------------------------------------------------------------------------
+
+moveIndexToFront :: MonadMetadata m => [Item String] -> m [Item String]
+moveIndexToFront itemList =
+    return (moveToFront "index.html" itemList)
+        where
+          moveToFront x xs =
+            case break (\y -> itemBody y == x) xs of
+              (a,y:ys) -> y:a ++ ys
+              (a,ys) -> a ++ ys
+
+ --   sortByM $ getItemUTC defaultTimeLocale . itemIdentifier
+ -- where
+  --  sortByM :: (Monad m, Ord k) => (a -> m k) -> [a] -> m [a]
+   -- sortByM f xs = liftM (map fst . sortBy (comparing snd)) $
+    --               mapM (\x -> liftM (x,) (f x)) xs
+
+
+-- fix menu like troels.. we have to define content and non-content.. overvej hvad kan hives ud af menu functionen.
 -- overvej multi-tag site altså tag africa og thailand
 -- overvej ikke så meget folder structur.. men du skal kunne have lande billede jo... det er et spørgsmål om hvordan jeg vil parse
