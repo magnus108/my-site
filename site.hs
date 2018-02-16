@@ -34,7 +34,7 @@ main = hakyll $ do
         route   idRoute
         compile compressCssCompiler
 
-    match (content .||. "index.html") $
+    match (content .||. "index.html" .||. "archive.html") $
         version "routes" $ do
             compile $ do
                 underLying <- fmap (setVersion Nothing) getUnderlying
@@ -108,21 +108,34 @@ main = hakyll $ do
                 >>= cleanIndexUrls
 
 
-{-    create ["archive.html"] $ do
+    match "archive.html" $ do
         route cleanRoute
         compile $ do
             posts <- recentFirst =<< loadAll (posts .&&. hasNoVersion)
+            routes <- moveIndexToFront =<< loadAll (hasVersion "routes")
+
+            currentRoute <- getRoute =<< getUnderlying
+
+            let menuCtx = listField "menu"
+                              (   field "url" urlFromFilePathItem
+                              <>  boolField "currentRoute"
+                                      (isItem (fromMaybe "" currentRoute))
+                              <>  defaultContext
+                              )
+                              (return routes)
+                          <> defaultContext
+
+
             let archiveCtx =
                     listField "posts" postCtx (return posts) `mappend`
-                    constField "title" "Archives"            `mappend`
                     defaultContext
 
-            makeItem ""
-                >>= loadAndApplyTemplate "templates/archive.html" archiveCtx
-                >>= loadAndApplyTemplate "templates/default.html" archiveCtx
+            getResourceBody
+                >>= applyAsTemplate archiveCtx
+                >>= loadAndApplyTemplate "templates/default.html" (archiveCtx <> menuCtx)
                 >>= relativizeUrls
                 >>= cleanIndexUrls
--}
+
 
     match "index.html" $ do
         route idRoute
@@ -144,7 +157,6 @@ main = hakyll $ do
             let indexCtx =
                     listField "posts" postCtx (return posts) `mappend`
                     listField "tags" defaultContext (return (collectTags tags)) <>
-                    constField "title" "Home"                `mappend`
                     defaultContext
 
             getResourceBody
@@ -296,13 +308,11 @@ moveIndexToFront itemList =
               (a,y:ys) -> y:a ++ ys
               (a,ys) -> a ++ ys
 
- --   sortByM $ getItemUTC defaultTimeLocale . itemIdentifier
- -- where
-  --  sortByM :: (Monad m, Ord k) => (a -> m k) -> [a] -> m [a]
-   -- sortByM f xs = liftM (map fst . sortBy (comparing snd)) $
-    --               mapM (\x -> liftM (x,) (f x)) xs
 
 
+
+-- Paginate brother...
 -- fix menu like troels.. we have to define content and non-content.. overvej hvad kan hives ud af menu functionen.
 -- overvej multi-tag site altså tag africa og thailand
 -- overvej ikke så meget folder structur.. men du skal kunne have lande billede jo... det er et spørgsmål om hvordan jeg vil parse
+--
