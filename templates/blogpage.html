@@ -1,0 +1,23 @@
+<div>
+    $for(posts)$
+        <div>
+            <a href="$url$">$title$</a>
+        </div>
+    $endfor$
+    <hr>
+    <div class="pagination">
+        $if(previousPageNum)$
+            <a href="$previousPageUrl$">previous</a>
+        $else$
+            <a href="$lastPageUrl$">to last page</a>
+        $endif$
+        <br>
+        page $currentPageNum$ of $numPages$
+        <br>
+        $if(nextPageNum)$
+            <a href="$nextPageUrl$">next</a>
+        $else$
+            <a href="$firstPageUrl$">back to first</a>
+        $endif$
+    </div>
+</div>
