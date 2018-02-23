@@ -1,4 +1,5 @@
 --------------------------------------------------------------------------------
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE OverloadedStrings #-}
 import           Control.Arrow (first, (&&&))
 import           Control.Monad (liftM, zipWithM_)
@@ -8,7 +9,12 @@ import           Hakyll
 import           Data.Maybe
 import           System.FilePath
 import           System.FilePath.Posix (takeBaseName,takeDirectory,(</>))
-import           Data.List (insert, partition, delete, isSuffixOf)
+import           Data.List (insert, partition, delete, isSuffixOf, dropWhileEnd)
+import           Data.List.Extra (takeWhileEnd)
+import           Data.List.Split
+
+
+import qualified Data.Char as C (toLower)
 
 
 import Text.Blaze.Internal (preEscapedString)
@@ -20,7 +26,7 @@ import Text.Blaze.Html.Renderer.String (renderHtml)
 import Debug.Trace
 -------------------------------------------------------------------------------
 posts = "posts/*/*/*.markdown"
-
+employees = "employees/*/about.markdown"
 
 --------------------------------------------------------------------------------
 main :: IO ()
@@ -44,12 +50,27 @@ main = hakyll $ do
 
     match "posts/*/about.markdown" $ do
         addToMenu
+        addToCountry
         route cleanRoute2
         compile $ do
             menu <- getMenu
 
             pandocCompiler
                 >>= loadAndApplyTemplate "templates/default.html" (menu <> defaultContext)
+                >>= relativizeUrls
+                >>= cleanIndexUrls
+
+
+    match employees $ do
+        addToMenu
+        addToEmployee
+        route cleanRoute2
+        compile $ do
+            menu <- getMenu
+
+            pandocCompiler
+                >>= loadAndApplyTemplate "templates/employee.html" (menu <> countriesCtx <> defaultContext)
+                >>= loadAndApplyTemplate "templates/default.html" (menu <> countriesCtx <> defaultContext)
                 >>= relativizeUrls
                 >>= cleanIndexUrls
 
@@ -118,8 +139,9 @@ main = hakyll $ do
         compile $ do
             menu <- getMenu
 
+
             pandocCompiler
-                >>= loadAndApplyTemplate "templates/post.html"    (postCtxWithTags tags <> postImageField <> menu <> defaultContext)
+                >>= loadAndApplyTemplate "templates/post.html" (employeeCtx <> postCtxWithTags tags <> postImageField <> menu <> defaultContext)
                 >>= loadAndApplyTemplate "templates/default.html" (postCtxWithTags tags <> postImageField <> menu <> defaultContext)
                 >>= relativizeUrls
                 >>= cleanIndexUrls
@@ -144,6 +166,7 @@ main = hakyll $ do
                 >>= cleanIndexUrls
 
 
+    --- hvorfor er du forsvundet fra menuen?g
     match "index.html" $ do
         addToMenu
         route idRoute
@@ -153,8 +176,12 @@ main = hakyll $ do
             --posts skal måske også hives ud?
             posts <- recentFirst =<< loadAll (posts .&&. hasNoVersion)
 
+
+            employees <- loadAll (employees .&&. hasNoVersion)
+
             let indexCtx =
                     listField "posts" postCtx (return posts) `mappend`
+                    listField "employees" defaultContext (return employees) `mappend`
                     listField "tags" defaultContext (return (collectTags tags)) <>
                     defaultContext
 
@@ -186,6 +213,8 @@ isItem x item = itemBody item == x
 
 
 collectTags tags = map (\(t, _) -> Item (tagsMakeId tags t) t) (tagsMap tags)
+--collectTags tags = filter (\x -> (itemBody x) == "bar1") $ map (\(t, _) -> Item (tagsMakeId tags t) t) (tagsMap tags)
+
 
 
 cleanRoute :: Routes
@@ -323,8 +352,29 @@ grouper ids = (liftM (paginateEvery 2) . sortRecentFirst) ids
 makeId :: PageNumber -> Identifier
 makeId pageNum = fromFilePath $ "blog/page/" ++ (show pageNum) ++ ".html"
 -------------------------------------------------------------------------------
+addToEmployee :: Rules ()
+addToEmployee = version "employees" $ compile $ makeItem =<< toEmployee
 
 
+toEmployee :: Compiler String
+-- boi this uggly
+toEmployee = (\y -> fmap (\x -> getLastFolder x ++ ":" ++ (toLower y)) getResourceFilePath) =<< metaCountries
+
+
+metaCountries :: Compiler String
+metaCountries = getUnderlying >>= (\i -> getMetadataField' i "countries")
+-------------------------------------------------------------------------------
+addToCountry :: Rules ()
+addToCountry = version "countries" $ compile $ makeItem =<< toCountry
+
+
+toCountry :: Compiler String
+toCountry = fmap getLastFolder getResourceFilePath
+
+getLastFolder :: FilePath -> String
+getLastFolder f = last (splitDirectories (takeDirectory f))
+
+-------------------------------------------------------------------------------
 addToMenu :: Rules ()
 addToMenu = version "routes" $ compile $ makeItem =<< maybeToRoute Nothing
 
@@ -340,6 +390,63 @@ routeForUnderlying v = getRoute =<< (setUnderlyingVersion v)
 setUnderlyingVersion :: Maybe String -> Compiler Identifier
 setUnderlyingVersion v = fmap (setVersion v) getUnderlying
 
+
+-------------------------------------------------------------------------------
+employeeCtx :: Context String
+employeeCtx =
+    field "employee" getEmployee
+
+
+--okay først få den til at get employee senere check den employee faktisk sælger land 
+-- dette kan lade sig gøre ved at tilføje mere til addToEmployee..
+getEmployee :: Item a -> Compiler String
+getEmployee item = do
+    country <- getResourceFilePath >>= (\f -> return $ splitDirectories (takeDirectory f) !! 2)
+    employee <- getMetadataField' (itemIdentifier item) "employee"
+    employees <- loadAll (hasVersion "employees")
+    if any (employeeSellsCountry employee country . itemBody) employees then
+        return employee
+    else
+        error $ "could not parse employee field:" ++ employee
+
+
+employeeSellsCountry :: String -> String -> String -> Bool
+employeeSellsCountry currentEmployee currentCountry body =
+    toLower currentEmployee == employee && currentCountry `elem` (splitOn "," countries)
+        where
+            employee = takeWhile ((/=) ':') body
+            countries = takeWhileEnd ((/=) ':') body
+
+-------------------------------------------------------------------------------
+
+countryCtx :: Context String
+countryCtx = field "title" (\item -> return $ itemBody item)
+
+
+countriesCtx :: Context String
+countriesCtx =
+    listFieldWith "countries" countryCtx getCountries <>
+    defaultContext
+
+
+getCountries :: Item a -> Compiler [Item String]
+getCountries item = do
+    countries <- getMetadataField' (itemIdentifier item) "countries"
+    mapM getCountry (splitOn "," countries)
+
+
+getCountry :: String -> Compiler (Item String)
+getCountry x = do
+    countries <- loadAll (hasVersion "countries")
+    -- okay fst af itemBody er italy... snd er Italy? 
+    -- okay fst af itemBody er italy... snd er Italy? 
+    --  MAYBEINSTEADER JUST DEKAPITALIZZE??!? altså lav Italy til italy?
+    if toLower x `elem` (fmap (itemBody) countries) then
+        makeItem x
+    else
+        error $ "could not parse countries field:" ++ x
+
+toLower = fmap C.toLower
 
 getMenu :: Compiler (Context String)
 getMenu = do
@@ -367,16 +474,17 @@ menuCtx currentRoute =
 -------------------------------------------------------------------------------
 
 
-data MenuLevel = MenuLevel { prevItems :: [(FilePath,String)]
-                           , aftItems  :: [(FilePath,String)]
+data MenuLevel = MenuLevel { prevItems :: [FilePath]
+                           , currItem  :: FilePath
+                           , aftItems  :: [FilePath]
                            } deriving (Show)
 
-allItems :: MenuLevel -> [(FilePath, String)]
+allItems :: MenuLevel -> [FilePath]
 allItems l = prevItems l ++ aftItems l
 
 
-emptyMenuLevel :: MenuLevel
-emptyMenuLevel = MenuLevel [] []
+initMenuLevel :: FilePath -> MenuLevel
+initMenuLevel x = MenuLevel [] x []
 
 
 insertUniq :: Ord a => a -> [a] -> [a]
@@ -384,7 +492,7 @@ insertUniq x xs | x `elem` xs = xs
                 | otherwise = insert x xs
 
 
-insertItem :: MenuLevel -> (FilePath, String) -> MenuLevel
+insertItem :: MenuLevel -> FilePath -> MenuLevel
 insertItem l v = case aftItems l of
                     []     -> atPrev
                     (x:xs) | v < x     -> atPrev
@@ -392,15 +500,20 @@ insertItem l v = case aftItems l of
     where atPrev = l { prevItems = insertUniq v (prevItems l) }
 
 
-insertFocused :: MenuLevel -> (FilePath, String) -> MenuLevel
-insertFocused l v = MenuLevel bef (v:aft)
-    where (bef, aft) = partition (<v) (delete v $ allItems l)
+insertFocused :: MenuLevel -> FilePath -> MenuLevel
+--insertFocused l v = MenuLevel bef (v:aft)
+ --   where (bef, aft) = partition (<v) (delete v $ allItems l)
+insertFocused l v = MenuLevel bef v aft
+    where (bef, aft) = partition (<v) (allItems l)
 
 
-newtype Menu = Menu { menuLevels :: [MenuLevel] } deriving (Show)
+
+newtype MMenu a b = MMenu { menuLevels :: a b } deriving (Show, Foldable)
+
+type Menu = MMenu [] MenuLevel
 
 emptyMenu :: Menu
-emptyMenu = Menu []
+emptyMenu = MMenu []
 
 
 relevant :: FilePath -> FilePath -> [FilePath]
@@ -411,43 +524,40 @@ relevant this other = relevant' (splitPath this) (splitPath other)
 
 
 buildMenu :: FilePath -> [FilePath] -> Menu
-buildMenu this = foldl (extendMenu this) emptyMenu
-                 . map (first dropIndex . (id &&& dropExtension . takeFileName))
+buildMenu currentRoute routes = foldl (extendMenu currentRoute) emptyMenu routes
 
-dropIndex :: FilePath -> FilePath
-dropIndex p | takeBaseName p == "index" = dropFileName p
-            | otherwise                 = p
 
-extendMenu :: FilePath -> Menu -> (FilePath, String) -> Menu
-extendMenu this m (path, name) =
-    if path' `elem` ["./", "/", ""] then m else
-       Menu $ add (menuLevels m) (relevant this' path') "/"
+extendMenu :: FilePath -> Menu -> FilePath -> Menu
+extendMenu currentRoute menu route =
+    foldl add menu (relevant currentRoute route)
+        where
+            add acc y = acc
+
+--extendMenu currentRoute m path =
+  {-Menu $
+    add (menuLevels m) (relevant this' path') "/"
     where add ls [] _ = ls
           add ls (x:xs) p
-            | x `elem` focused = insertFocused l (p++x,name') : add ls' xs (p++x)
-            | otherwise        = insertItem l (p++x,name') : add ls' xs (p++x)
-            where (l,ls') = case ls of []  -> (emptyMenuLevel, [])
+            | x `elem` focused = insertFocused l (p++x) : add ls' xs (p++x)
+            | otherwise        = insertItem l (p++x) : add ls' xs (p++x)
+            where (l,ls') = case ls of []  -> (initMenuLevel path', [])
                                        k:ks -> (k,ks)
-                  name' = if hasTrailingPathSeparator x then x else name
           focused = splitPath this'
           path' = normalise path
-          this' = normalise this
-
-
+          this' = normalise currentRoute
+          -}
 
 
 showMenu :: Menu -> H.Html
 showMenu = zipWithM_ showMenuLevel [0..] . menuLevels
 
+
 showMenuLevel :: Int -> MenuLevel -> H.Html
 showMenuLevel d m =
   H.ul (mapM_ H.li elems) ! A.class_ (H.toValue $ "menu" ++ show d)
-    where showElem (p,k) = H.a (H.toHtml k) ! A.href (H.toValue p)
-          showFocusElem (p,k) = showElem (p,k) ! A.class_ "thisPage"
-          elems = map showElem (prevItems m) ++
-                  case aftItems m of []     -> []
-                                     (l:ls) -> showFocusElem l :
-                                               map showElem ls
+    where showElem (p) = H.a (H.toHtml p) ! A.href (H.toValue p)
+          showFocusElem (p) = showElem (p) ! A.class_ "thisPage"
+          elems = map showElem (prevItems m) ++ [showFocusElem (currItem m)] ++ map showElem (aftItems m)
 {-
 <ul>
     $for(menu)$
@@ -464,4 +574,11 @@ showMenuLevel d m =
 </ul>
 -}
 
+
+-- add sælger to travel.. husk du kan lave ligsom med add to menu og så filtrer. du kan sikkert også kaste en fejl
 -- Du skal fixe menuen.. overvej om rejserne skal tilføjes til menuen?
+-- OVERVEJ OM DU BARE  BØR LAVE EN MASSE submenuer.. det er nemmere og mere flexibelt?
+
+            -- UPDATE THIS LIST DYNAMICALLY USING A function like addToMenu but addToCountries
+            -- YOU can also do this for each travel!
+            --let isCountry x = if x `elem` ["China", "Africa", "Italy", "Thailand"] then
